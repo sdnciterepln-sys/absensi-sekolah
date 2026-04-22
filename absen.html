@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Absensi Selfie SDN</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #1a1a2e; color: white; margin: 0; padding: 20px; display: flex; justify-content: center; }
+        .container { width: 100%; max-width: 400px; background: #16213e; padding: 20px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; }
+        h2 { margin-bottom: 15px; font-size: 20px; }
+        input { width: 100%; padding: 12px; margin-bottom: 10px; border-radius: 10px; border: none; font-size: 16px; box-sizing: border-box; }
+        
+        /* Frame Kamera Selfie */
+        .video-wrap { position: relative; width: 100%; padding-top: 100%; /* Kotak Persegi */ background: #000; border-radius: 15px; overflow: hidden; margin-bottom: 15px; border: 2px solid #0f3460; }
+        video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        canvas { display: none; }
+        #photo-preview { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; display: none; z-index: 10; border-radius: 15px; }
+
+        .btn-capture { background: #e94560; color: white; border: none; padding: 15px; border-radius: 50px; cursor: pointer; font-weight: bold; width: 100%; font-size: 16px; margin-bottom: 10px; }
+        .btn-send { background: #00d2d3; color: white; border: none; padding: 15px; border-radius: 10px; cursor: pointer; font-weight: bold; width: 100%; font-size: 16px; display: none; }
+        .btn-retry { background: #555; color: white; border: none; padding: 8px; border-radius: 5px; cursor: pointer; width: 100%; margin-top: 5px; display: none; }
+        
+        #status { margin-top: 10px; font-size: 14px; color: #00d2d3; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>📸 SELFIE ABSENSI</h2>
+    <input type="text" id="nama" placeholder="Nama Lengkap...">
+    <input type="text" id="kelas" placeholder="Kelas...">
+
+    <div class="video-wrap">
+        <video id="video" autoplay playsinline muted></video>
+        <img id="photo-preview">
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+    <button class="btn-capture" id="btn-snap" onclick="takeSnapshot()">📷 AMBIL FOTO</button>
+    <button class="btn-send" id="btn-kirim" onclick="sendData()">✅ KIRIM ABSENSI SEKARANG</button>
+    <button class="btn-retry" id="btn-ulang" onclick="retake()">🔄 Foto Ulang</button>
+
+    <div id="status">Mengaktifkan Kamera...</div>
+</div>
+
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const photoPreview = document.getElementById('photo-preview');
+const statusDiv = document.getElementById('status');
+const btnKirim = document.getElementById('btn-kirim');
+const btnSnap = document.getElementById('btn-snap');
+const btnUlang = document.getElementById('btn-ulang');
+
+let capturedImage = null;
+
+// AKTIFKAN KAMERA LIVE STREAMING
+async function startCamera() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: "user", width: 600, height: 600 }, 
+            audio: false 
+        });
+        video.srcObject = stream;
+        statusDiv.innerText = "Kamera Siap";
+    } catch (err) {
+        statusDiv.style.color = "red";
+        statusDiv.innerText = "Error: Kamera diblokir! Gunakan HTTPS.";
+        console.error(err);
+    }
+}
+
+function takeSnapshot() {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(video, 0, 0);
+    
+    capturedImage = canvas.toDataURL('image/jpeg', 0.7);
+    photoPreview.src = capturedImage;
+    
+    // Switch UI
+    photoPreview.style.display = "block";
+    btnSnap.style.display = "none";
+    btnKirim.style.display = "block";
+    btnUlang.style.display = "block";
+    statusDiv.innerText = "Foto diambil!";
+}
+
+function retake() {
+    photoPreview.style.display = "none";
+    btnSnap.style.display = "block";
+    btnKirim.style.display = "none";
+    btnUlang.style.display = "none";
+    statusDiv.innerText = "Kamera Siap";
+}
+
+async function sendData() {
+    const nama = document.getElementById('nama').value;
+    const kelas = document.getElementById('kelas').value;
+    if(!nama || !kelas) return alert("Isi Nama & Kelas!");
+
+    statusDiv.innerText = "⏳ Sedang Mengirim...";
+    btnKirim.disabled = true;
+
+    try {
+        // 1. Upload Foto ke Cloudinary
+        const formData = new FormData();
+        formData.append("file", capturedImage);
+        formData.append("upload_preset", "absensi_preset");
+        
+        const cloudRes = await fetch("https://api.cloudinary.com/v1_1/dbzlvjyzw/image/upload", {
+            method: "POST",
+            body: formData
+        });
+        const cloudData = await cloudRes.json();
+
+        // 2. Kirim Link ke Google Sheet
+        await fetch("https://script.google.com/macros/s/AKfycbyyu5CmCoCVpDSPiG13jYa1MO81kh4uHZ0K07K4Q1u9DVb_crhcZTDUKp_YjYd1IaRshQ/exec", {
+            method: "POST",
+            mode: "no-cors",
+            body: JSON.stringify({ nama: nama, kelas: kelas, foto: cloudData.secure_url })
+        });
+
+        alert("Absensi Berhasil!");
+        location.reload();
+    } catch (e) {
+        alert("Gagal mengirim! Cek internet.");
+        btnKirim.disabled = false;
+    }
+}
+
+// Jalankan kamera otomatis
+startCamera();
+</script>
+</body>
+</html>
